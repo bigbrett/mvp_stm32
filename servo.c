@@ -7,6 +7,7 @@
  */
 #include "servo.h"
 
+
 /* PRIVATE: Enables Port B pin 6 for Alternate Function 2 (TIM4 ch1) for servo control */
 void enable_PB6_PB7_AF2()
 {
@@ -45,7 +46,8 @@ void tim4_pwm_ch1_ch2_init()
 	// capture compare on ch2 and ch2 output enable
 	TIM4->TIMx_CCER |= 0x11; // bit 4 and bit 0 high
 
-	// Set PSC and ARR to achieve the desired fundemental frequency of 1kHz
+	// Set PSC and ARR to achieve a pwm frequency of 50Hz from the 16MHz system clock
+	// ((16*10^6)/160)/2000 = 50
 	TIM4->TIMx_PSC = 159; // SYSCLOCK/(PSC+1) = CK_CNT; and SYSCLOCK = 16Mhz
 	TIM4->TIMx_ARR = 2000; // 1/20kHz = 50 Hz
 
@@ -61,13 +63,36 @@ void tim4_pwm_ch1_ch2_init()
 /* updates TIM4 duty cycle to value passed as argument */
 void pwm_ch1_updateDutyCycle(uint32_t newval)
 {
-	TIM4->TIMx_CCR1 = newval/41 + 100;
+	//TIM4->TIMx_CCR1 = newval/41 + 100;
+	TIM4->TIMx_CCR1 = newval/10;
 }
 
 void pwm_ch2_updateDutyCycle(uint32_t newval)
 {
-	TIM4->TIMx_CCR2 = newval/41 + 100;
+	//TIM4->TIMx_CCR2 = newval/41 + 100;
+	TIM4->TIMx_CCR2 = newval/10;
 }
+
+
+/*
+ * R MOTOR Corresponds to ch1
+ * L MOTOR corresponds to ch2
+ */
+void pwm_updateDutyCycles(Motor_t mot, uint32_t val)
+{
+	if (mot == RMOTOR)
+	{
+		TIM4->TIMx_CCR1 = val;
+		return;
+	}
+
+	if (mot == LMOTOR)
+	{
+		TIM4->TIMx_CCR2 = val;
+		return;
+	}
+}
+
 
 /*
  * Kill the motors
@@ -75,7 +100,42 @@ void pwm_ch2_updateDutyCycle(uint32_t newval)
 void kill_pwm()
 {
 	// TODO
-	pwm_ch2_updateDutyCycle( MOTOR_OFF );
+	pwm_ch1_updateDutyCycle( MOTOR_OFF );
 	pwm_ch2_updateDutyCycle( MOTOR_OFF );
 }
 
+
+/*
+ * Scale speed commands into PWM range and update
+ * PWM output on TIM4
+ *
+ * XBee speed commands are to be sent in contiguous streams of 4 USART
+ * words, that honor the following byte order:
+ * 		first word  (XBee_RX_buf[0]): top 6 bits (most significant 6) of R Motor speed
+ * 		second word (XBee_RX_buf[1]): bottom 6 bits (least significant 6) of R Motor speed
+ * 		third word  (XBee_RX_buf[2]): top 6 bits (most significant 6) of L Motor speed
+ * 		fourth word (XBee_RX_buf[3]): bottom 6 bits (least significant 6) of L Motor speed
+ */
+void updateMotorSpeed(uint8_t *cmd_buf)
+{
+	/* Extract speed commands for each motor */
+//	uint16_t top    = BOTTOM6(cmd_buf[0]);
+//	top = top << 6;
+//	uint16_t bottom = BOTTOM6(cmd_buf[1]);
+//	uint32_t lspeed = top | bottom;
+//	uint32_t rspeed = (BOTTOM6(cmd_buf[2]) << 6) | BOTTOM6(cmd_buf[3]);
+	uint32_t lspeed = (BOTTOM6(cmd_buf[0]) << 6) | BOTTOM6(cmd_buf[1]);
+	uint32_t rspeed = (BOTTOM6(cmd_buf[2]) << 6) | BOTTOM6(cmd_buf[3]);
+
+	/* Scale speed commands into the PWM range */
+	lspeed = MIN_DUTY_CYCLE + PWM_MAP_SLOPE * lspeed;
+	rspeed = MIN_DUTY_CYCLE + PWM_MAP_SLOPE * rspeed;
+
+	// TODO check bounds on speed commands
+
+	/* Update PWM duty cycles
+	 * R Motor = ch1
+	 * L Motor = ch2 */
+	pwm_ch1_updateDutyCycle(rspeed);
+	pwm_ch2_updateDutyCycle(lspeed);
+}

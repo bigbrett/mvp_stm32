@@ -23,6 +23,11 @@ void TIM7_init(void(*TIM7_callback_fn)(void))
 	// one pulse mode and interrupt on overflow
 	NVIC_INTERRUPT_TIM7_ENABLE();
 	TIM7->TIMx_CR1 |= 0x8C;
+
+	// default period 1 second
+	TIM7->TIMx_PSC = 800; // set prescaler (old = 65536)
+	TIM7->TIMx_EGR |= 0x1;
+	TIM7->TIMx_CR1 |= 0x1;
 }
 
 void TIM7_1_sec(void)
